@@ -25,7 +25,7 @@ This package implements a basic PE loader in python (can load simple
 executable like calc.exe, net1.exe, little malwares...)
 """
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 __author__ = "Maurice Lambert"
 __author_email__ = "mauricelambert434@gmail.com"
 __maintainer__ = "Maurice Lambert"
@@ -222,10 +222,10 @@ class IMAGE_IMPORT_BY_NAME(ctypes.Structure):
 
 class IMAGE_THUNK_DATA_UNION64(ctypes.Union):
     _fields_ = [
-        ("Function", ctypes.POINTER(ctypes.c_uint32)),
-        ("Ordinal", ctypes.c_uint32),
-        ("AddressOfData", ctypes.POINTER(IMAGE_IMPORT_BY_NAME)),
-        ("ForwarderString", ctypes.c_uint32),
+        ("Function", ctypes.c_uint64),
+        ("Ordinal", ctypes.c_uint64),
+        ("AddressOfData", ctypes.c_uint64),
+        ("ForwarderString", ctypes.c_uint64),
     ]
 
 
@@ -478,7 +478,7 @@ def load_in_memory(file: _BufferedIOBase, pe_headers: PeHeaders) -> int:
 
 def get_functions(
     ImageBase: int, position: int, struct: type
-) -> Iterable[Tuple[int, wintypes.LPCSTR]]:
+) -> Iterable[Tuple[int, int]]: # wintypes.LPCSTR
     """
     This function loads the PE program in memory
     using the file and all PE headers.
@@ -490,11 +490,11 @@ def get_functions(
         ImageBase + position, struct
     ):
         address = thunk_data.u1.Ordinal
-        if not (address & 0x80000000):
+        if not (address & 0x8000000000000000):
             data = get_data_from_memory(ImageBase + address, size_import_name)
             import_by_name = load_struct_from_bytes(IMAGE_IMPORT_BY_NAME, data)
             address = ImageBase + address + IMAGE_IMPORT_BY_NAME.Name.offset
-        yield index, wintypes.LPCSTR(address)
+        yield index, address # wintypes.LPCSTR(address)
 
 
 def load_imports(pe_headers: PeHeaders, ImageBase: int) -> None:
@@ -527,7 +527,9 @@ def load_imports(pe_headers: PeHeaders, ImageBase: int) -> None:
         for counter, function in get_functions(
             ImageBase, import_descriptor.Misc.OriginalFirstThunk, type_
         ):
-            address = GetProcAddress(module, function)
+            address = GetProcAddress(
+                module, wintypes.LPCSTR(function & 0x7fffffffffffffff)
+            )
             function_position = (
                 ImageBase + import_descriptor.FirstThunk + size_thunk * counter
             )

@@ -1,6 +1,6 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.2
 Name: PyPeLoader
-Version: 0.0.1
+Version: 0.0.2
 Summary: This package implements a basic PE loader in python (can load simple executable like calc.exe, net1.exe, little malwares...)
 Home-page: https://github.com/mauricelambert/PyPeLoader
 Download-URL: https://mauricelambert.github.io/info/python/security/PyPeLoader.pyz
@@ -32,6 +32,11 @@ Classifier: License :: OSI Approved :: GNU General Public License v3 or later (G
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
 License-File: LICENSE.txt
+Dynamic: author
+Dynamic: download-url
+Dynamic: home-page
+Dynamic: maintainer
+Dynamic: requires-python
 
 ![PyPeLoader Logo](https://mauricelambert.github.io/info/python/security/PyPeLoader_small.png "PyPeLoader logo")
 

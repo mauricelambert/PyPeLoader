@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='PyPeLoader',
-    version="0.0.1",
+    version='0.0.2',
     py_modules=['PyPeLoader'],
     packages=find_packages(include=[]),
     install_requires=[],
