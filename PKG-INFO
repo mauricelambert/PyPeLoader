@@ -1,7 +1,7 @@
 Metadata-Version: 2.2
 Name: PyPeLoader
-Version: 0.0.2
-Summary: This package implements a basic PE loader in python (can load simple executable like calc.exe, net1.exe, little malwares...)
+Version: 0.1.0
+Summary: This package implements a basic PE loader in python to load executables in memory.
 Home-page: https://github.com/mauricelambert/PyPeLoader
 Download-URL: https://mauricelambert.github.io/info/python/security/PyPeLoader.pyz
 Author: Maurice Lambert
@@ -13,7 +13,7 @@ Project-URL: Github, https://github.com/mauricelambert/PyPeLoader
 Project-URL: Documentation, https://mauricelambert.github.io/info/python/security/PyPeLoader.html
 Project-URL: Python Executable, https://mauricelambert.github.io/info/python/security/PyPeLoader.pyz
 Project-URL: Windows Executable, https://mauricelambert.github.io/info/python/security/PyPeLoader.exe
-Keywords: PeLoader,Loader,Linker,WindowsLinker,Packer,MemoryExecution,AntivirusBypass,Antivirus,Bypass
+Keywords: PeLoader,Loader,Linker,WindowsLinker,Packer,MemoryExecution,AntivirusBypass,Antivirus,Bypass,Hooks,Win32,WinAPI,reverse,malware-reverse
 Platform: Windows
 Classifier: Topic :: System
 Classifier: Topic :: Security
@@ -26,8 +26,8 @@ Classifier: Topic :: System :: System Shells
 Classifier: Programming Language :: Python :: 3.8
 Classifier: Operating System :: Microsoft :: Windows
 Classifier: Topic :: System :: Systems Administration
-Classifier: Development Status :: 5 - Production/Stable
 Classifier: Intended Audience :: System Administrators
+Classifier: Development Status :: 5 - Production/Stable
 Classifier: License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown

@@ -4,7 +4,7 @@
 
 [project]
 name = "PyPeLoader"
-version = "0.0.2"
+version = "0.1.0"
 dependencies = []
 authors = [
     {name = "Maurice Lambert", email = "mauricelambert434@gmail.com"},
@@ -12,7 +12,7 @@ authors = [
 maintainers = [
     {name = "Maurice Lambert", email = "mauricelambert434@gmail.com"},
 ]
-description = 'This package implements a basic PE loader in python (can load simple executable like calc.exe, net1.exe, little malwares...)'
+description = 'This package implements a basic PE loader in python to load executables in memory.'
 readme = {file = "README.md", content-type = "text/markdown"}
 # url = "https://github.com/mauricelambert/PyPeLoader"
 # download-url = "https://mauricelambert.github.io/info/python/security/PyPeLoader.pyz"
@@ -28,11 +28,11 @@ classifiers = [
     "Programming Language :: Python :: 3.8",
     'Operating System :: Microsoft :: Windows',
     "Topic :: System :: Systems Administration",
-    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: System Administrators",
+    "Development Status :: 5 - Production/Stable",
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
 ]
-keywords = ['PeLoader', 'Loader', 'Linker', 'WindowsLinker', 'Packer', 'MemoryExecution', 'AntivirusBypass', 'Antivirus', 'Bypass']
+keywords = ['PeLoader', 'Loader', 'Linker', 'WindowsLinker', 'Packer', 'MemoryExecution', 'AntivirusBypass', 'Antivirus', 'Bypass', 'Hooks', 'Win32', 'WinAPI', 'reverse', 'malware-reverse']
 license = {text = "GPL-3.0 License"}
 requires-python = ">=3.8"
 

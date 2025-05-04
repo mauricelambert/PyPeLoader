@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 ###################
-#    This package implements a basic PE loader in python (can load simple
-#    executable like calc.exe, net1.exe, little malwares...)
+#    This package implements a basic PE loader in python to
+#    load executables in memory.
 #    Copyright (C) 2025  PyPeLoader
 
 #    This program is free software: you can redistribute it and/or modify
@@ -21,18 +21,18 @@
 ###################
 
 """
-This package implements a basic PE loader in python (can load simple
-executable like calc.exe, net1.exe, little malwares...)
+This package implements a basic PE loader in python to
+load executables in memory.
 """
 
-__version__ = "0.0.2"
+__version__ = "0.1.0"
 __author__ = "Maurice Lambert"
 __author_email__ = "mauricelambert434@gmail.com"
 __maintainer__ = "Maurice Lambert"
 __maintainer_email__ = "mauricelambert434@gmail.com"
 __description__ = """
-This package implements a basic PE loader in python (can load simple
-executable like calc.exe, net1.exe, little malwares...)
+This package implements a basic PE loader in python to
+load executables in memory.
 """
 __url__ = "https://github.com/mauricelambert/PyPeLoader"
 
@@ -43,6 +43,7 @@ __all__ = [
     "load_in_memory",
     "load_imports",
     "load_relocations",
+    "ImportFunction",
 ]
 
 __license__ = "GPL-3.0 License"
@@ -57,210 +58,310 @@ license = __license__
 
 print(copyright)
 
-from typing import Union, Tuple, Iterable
+from ctypes import (
+    Structure,
+    Union,
+    memmove,
+    memset,
+    sizeof,
+    byref,
+    pointer,
+    POINTER,
+    CFUNCTYPE,
+    windll,
+    c_byte,
+    c_int,
+    c_uint32,
+    c_uint16,
+    c_uint64,
+    c_uint8,
+    c_ulong,
+    c_void_p,
+    c_char,
+    c_size_t,
+    c_bool,
+)
+from typing import Union as UnionType, Tuple, Iterable, List, Callable
+from ctypes.wintypes import HMODULE, LPCSTR, DWORD
 from sys import argv, executable, exit
 from dataclasses import dataclass
 from _io import _BufferedIOBase
-from ctypes import wintypes
-import ctypes
 
 
-class IMAGE_DOS_HEADER(ctypes.Structure):
+class IMAGE_DOS_HEADER(Structure):
+    """
+    This class implements the structure to parses the DOS Headers.
+    """
+
     _fields_ = [
-        ("e_magic", ctypes.c_uint16),
-        ("e_cblp", ctypes.c_uint16),
-        ("e_cp", ctypes.c_uint16),
-        ("e_crlc", ctypes.c_uint16),
-        ("e_cparhdr", ctypes.c_uint16),
-        ("e_minalloc", ctypes.c_uint16),
-        ("e_maxalloc", ctypes.c_uint16),
-        ("e_ss", ctypes.c_uint16),
-        ("e_sp", ctypes.c_uint16),
-        ("e_csum", ctypes.c_uint16),
-        ("e_ip", ctypes.c_uint16),
-        ("e_cs", ctypes.c_uint16),
-        ("e_lfarlc", ctypes.c_uint16),
-        ("e_ovno", ctypes.c_uint16),
-        ("e_res", ctypes.c_uint16 * 4),
-        ("e_oemid", ctypes.c_uint16),
-        ("e_oeminfo", ctypes.c_uint16),
-        ("e_res2", ctypes.c_uint16 * 10),
-        ("e_lfanew", ctypes.c_uint32),
+        ("e_magic", c_uint16),
+        ("e_cblp", c_uint16),
+        ("e_cp", c_uint16),
+        ("e_crlc", c_uint16),
+        ("e_cparhdr", c_uint16),
+        ("e_minalloc", c_uint16),
+        ("e_maxalloc", c_uint16),
+        ("e_ss", c_uint16),
+        ("e_sp", c_uint16),
+        ("e_csum", c_uint16),
+        ("e_ip", c_uint16),
+        ("e_cs", c_uint16),
+        ("e_lfarlc", c_uint16),
+        ("e_ovno", c_uint16),
+        ("e_res", c_uint16 * 4),
+        ("e_oemid", c_uint16),
+        ("e_oeminfo", c_uint16),
+        ("e_res2", c_uint16 * 10),
+        ("e_lfanew", c_uint32),
     ]
 
 
-class IMAGE_FILE_HEADER(ctypes.Structure):
+class IMAGE_FILE_HEADER(Structure):
+    """
+    This class implements the structure to parses the FILE Headers.
+    """
+
     _fields_ = [
-        ("Machine", ctypes.c_uint16),
-        ("NumberOfSections", ctypes.c_uint16),
-        ("TimeDateStamp", ctypes.c_uint32),
-        ("PointerToSymbolTable", ctypes.c_uint32),
-        ("NumberOfSymbols", ctypes.c_uint32),
-        ("SizeOfOptionalHeader", ctypes.c_uint16),
-        ("Characteristics", ctypes.c_uint16),
+        ("Machine", c_uint16),
+        ("NumberOfSections", c_uint16),
+        ("TimeDateStamp", c_uint32),
+        ("PointerToSymbolTable", c_uint32),
+        ("NumberOfSymbols", c_uint32),
+        ("SizeOfOptionalHeader", c_uint16),
+        ("Characteristics", c_uint16),
     ]
 
 
-class IMAGE_DATA_DIRECTORY(ctypes.Structure):
-    _fields_ = [("VirtualAddress", ctypes.c_uint32), ("Size", ctypes.c_uint32)]
+class IMAGE_DATA_DIRECTORY(Structure):
+    """
+    This class implements the structure to parses data directories.
+    """
+
+    _fields_ = [("VirtualAddress", c_uint32), ("Size", c_uint32)]
 
 
-class IMAGE_OPTIONAL_HEADER32(ctypes.Structure):
+class IMAGE_OPTIONAL_HEADER32(Structure):
+    """
+    This class implements the structure to parses x86 optional headers.
+    """
+
     _fields_ = [
-        ("Magic", ctypes.c_uint16),
-        ("MajorLinkerVersion", ctypes.c_uint8),
-        ("MinorLinkerVersion", ctypes.c_uint8),
-        ("SizeOfCode", ctypes.c_uint32),
-        ("SizeOfInitializedData", ctypes.c_uint32),
-        ("SizeOfUninitializedData", ctypes.c_uint32),
-        ("AddressOfEntryPoint", ctypes.c_uint32),
-        ("BaseOfCode", ctypes.c_uint32),
-        ("BaseOfData", ctypes.c_uint32),
-        ("ImageBase", ctypes.c_uint32),
-        ("SectionAlignment", ctypes.c_uint32),
-        ("FileAlignment", ctypes.c_uint32),
-        ("MajorOperatingSystemVersion", ctypes.c_uint16),
-        ("MinorOperatingSystemVersion", ctypes.c_uint16),
-        ("MajorImageVersion", ctypes.c_uint16),
-        ("MinorImageVersion", ctypes.c_uint16),
-        ("MajorSubsystemVersion", ctypes.c_uint16),
-        ("MinorSubsystemVersion", ctypes.c_uint16),
-        ("Win32VersionValue", ctypes.c_uint32),
-        ("SizeOfImage", ctypes.c_uint32),
-        ("SizeOfHeaders", ctypes.c_uint32),
-        ("CheckSum", ctypes.c_uint32),
-        ("Subsystem", ctypes.c_uint16),
-        ("DllCharacteristics", ctypes.c_uint16),
-        ("SizeOfStackReserve", ctypes.c_uint32),
-        ("SizeOfStackCommit", ctypes.c_uint32),
-        ("SizeOfHeapReserve", ctypes.c_uint32),
-        ("SizeOfHeapCommit", ctypes.c_uint32),
-        ("LoaderFlags", ctypes.c_uint32),
-        ("NumberOfRvaAndSizes", ctypes.c_uint32),
+        ("Magic", c_uint16),
+        ("MajorLinkerVersion", c_uint8),
+        ("MinorLinkerVersion", c_uint8),
+        ("SizeOfCode", c_uint32),
+        ("SizeOfInitializedData", c_uint32),
+        ("SizeOfUninitializedData", c_uint32),
+        ("AddressOfEntryPoint", c_uint32),
+        ("BaseOfCode", c_uint32),
+        ("BaseOfData", c_uint32),
+        ("ImageBase", c_uint32),
+        ("SectionAlignment", c_uint32),
+        ("FileAlignment", c_uint32),
+        ("MajorOperatingSystemVersion", c_uint16),
+        ("MinorOperatingSystemVersion", c_uint16),
+        ("MajorImageVersion", c_uint16),
+        ("MinorImageVersion", c_uint16),
+        ("MajorSubsystemVersion", c_uint16),
+        ("MinorSubsystemVersion", c_uint16),
+        ("Win32VersionValue", c_uint32),
+        ("SizeOfImage", c_uint32),
+        ("SizeOfHeaders", c_uint32),
+        ("CheckSum", c_uint32),
+        ("Subsystem", c_uint16),
+        ("DllCharacteristics", c_uint16),
+        ("SizeOfStackReserve", c_uint32),
+        ("SizeOfStackCommit", c_uint32),
+        ("SizeOfHeapReserve", c_uint32),
+        ("SizeOfHeapCommit", c_uint32),
+        ("LoaderFlags", c_uint32),
+        ("NumberOfRvaAndSizes", c_uint32),
         ("DataDirectory", IMAGE_DATA_DIRECTORY * 16),
     ]
 
 
-class IMAGE_OPTIONAL_HEADER64(ctypes.Structure):
+class IMAGE_OPTIONAL_HEADER64(Structure):
+    """
+    This class implements the structure to parses x64 optional headers.
+    """
+
     _fields_ = [
-        ("Magic", ctypes.c_uint16),
-        ("MajorLinkerVersion", ctypes.c_uint8),
-        ("MinorLinkerVersion", ctypes.c_uint8),
-        ("SizeOfCode", ctypes.c_uint32),
-        ("SizeOfInitializedData", ctypes.c_uint32),
-        ("SizeOfUninitializedData", ctypes.c_uint32),
-        ("AddressOfEntryPoint", ctypes.c_uint32),
-        ("BaseOfCode", ctypes.c_uint32),
-        ("ImageBase", ctypes.c_uint64),
-        ("SectionAlignment", ctypes.c_uint32),
-        ("FileAlignment", ctypes.c_uint32),
-        ("MajorOperatingSystemVersion", ctypes.c_uint16),
-        ("MinorOperatingSystemVersion", ctypes.c_uint16),
-        ("MajorImageVersion", ctypes.c_uint16),
-        ("MinorImageVersion", ctypes.c_uint16),
-        ("MajorSubsystemVersion", ctypes.c_uint16),
-        ("MinorSubsystemVersion", ctypes.c_uint16),
-        ("Win32VersionValue", ctypes.c_uint32),
-        ("SizeOfImage", ctypes.c_uint32),
-        ("SizeOfHeaders", ctypes.c_uint32),
-        ("CheckSum", ctypes.c_uint32),
-        ("Subsystem", ctypes.c_uint16),
-        ("DllCharacteristics", ctypes.c_uint16),
-        ("SizeOfStackReserve", ctypes.c_uint64),
-        ("SizeOfStackCommit", ctypes.c_uint64),
-        ("SizeOfHeapReserve", ctypes.c_uint64),
-        ("SizeOfHeapCommit", ctypes.c_uint64),
-        ("LoaderFlags", ctypes.c_uint32),
-        ("NumberOfRvaAndSizes", ctypes.c_uint32),
+        ("Magic", c_uint16),
+        ("MajorLinkerVersion", c_uint8),
+        ("MinorLinkerVersion", c_uint8),
+        ("SizeOfCode", c_uint32),
+        ("SizeOfInitializedData", c_uint32),
+        ("SizeOfUninitializedData", c_uint32),
+        ("AddressOfEntryPoint", c_uint32),
+        ("BaseOfCode", c_uint32),
+        ("ImageBase", c_uint64),
+        ("SectionAlignment", c_uint32),
+        ("FileAlignment", c_uint32),
+        ("MajorOperatingSystemVersion", c_uint16),
+        ("MinorOperatingSystemVersion", c_uint16),
+        ("MajorImageVersion", c_uint16),
+        ("MinorImageVersion", c_uint16),
+        ("MajorSubsystemVersion", c_uint16),
+        ("MinorSubsystemVersion", c_uint16),
+        ("Win32VersionValue", c_uint32),
+        ("SizeOfImage", c_uint32),
+        ("SizeOfHeaders", c_uint32),
+        ("CheckSum", c_uint32),
+        ("Subsystem", c_uint16),
+        ("DllCharacteristics", c_uint16),
+        ("SizeOfStackReserve", c_uint64),
+        ("SizeOfStackCommit", c_uint64),
+        ("SizeOfHeapReserve", c_uint64),
+        ("SizeOfHeapCommit", c_uint64),
+        ("LoaderFlags", c_uint32),
+        ("NumberOfRvaAndSizes", c_uint32),
         ("DataDirectory", IMAGE_DATA_DIRECTORY * 16),
     ]
 
 
-class IMAGE_NT_HEADERS(ctypes.Structure):
+class IMAGE_NT_HEADERS(Structure):
+    """
+    This class implements the structure to parses the NT headers.
+    """
+
     _fields_ = [
-        ("Signature", ctypes.c_uint32),
+        ("Signature", c_uint32),
         ("FileHeader", IMAGE_FILE_HEADER),
         ("OptionalHeader", IMAGE_OPTIONAL_HEADER32),
     ]
 
 
-class IMAGE_SECTION_HEADER(ctypes.Structure):
+class IMAGE_SECTION_HEADER(Structure):
+    """
+    This class implements the structure to parses sections headers.
+    """
+
     _fields_ = [
-        ("Name", ctypes.c_char * 8),
-        ("Misc", ctypes.c_uint32),
-        ("VirtualAddress", ctypes.c_uint32),
-        ("SizeOfRawData", ctypes.c_uint32),
-        ("PointerToRawData", ctypes.c_uint32),
-        ("PointerToRelocations", ctypes.c_uint32),
-        ("PointerToLinenumbers", ctypes.c_uint32),
-        ("NumberOfRelocations", ctypes.c_uint16),
-        ("NumberOfLinenumbers", ctypes.c_uint16),
-        ("Characteristics", ctypes.c_uint32),
+        ("Name", c_char * 8),
+        ("Misc", c_uint32),
+        ("VirtualAddress", c_uint32),
+        ("SizeOfRawData", c_uint32),
+        ("PointerToRawData", c_uint32),
+        ("PointerToRelocations", c_uint32),
+        ("PointerToLinenumbers", c_uint32),
+        ("NumberOfRelocations", c_uint16),
+        ("NumberOfLinenumbers", c_uint16),
+        ("Characteristics", c_uint32),
     ]
 
 
-class IMAGE_IMPORT_DESCRIPTOR_MISC(ctypes.Union):
+class IMAGE_IMPORT_DESCRIPTOR_MISC(Union):
+    """
+    This class implements the union to get the import misc.
+    """
+
     _fields_ = [
-        ("Characteristics", ctypes.c_uint32),
-        ("OriginalFirstThunk", ctypes.c_uint32),
+        ("Characteristics", c_uint32),
+        ("OriginalFirstThunk", c_uint32),
     ]
 
 
-class IMAGE_IMPORT_DESCRIPTOR(ctypes.Structure):
+class IMAGE_IMPORT_DESCRIPTOR(Structure):
+    """
+    This class implements the structure to parses imports.
+    """
+
     _fields_ = [
         ("Misc", IMAGE_IMPORT_DESCRIPTOR_MISC),
-        ("TimeDateStamp", ctypes.c_uint32),
-        ("ForwarderChain", ctypes.c_uint32),
-        ("Name", ctypes.c_uint32),
-        ("FirstThunk", ctypes.c_uint32),
+        ("TimeDateStamp", c_uint32),
+        ("ForwarderChain", c_uint32),
+        ("Name", c_uint32),
+        ("FirstThunk", c_uint32),
     ]
 
 
-class IMAGE_IMPORT_BY_NAME(ctypes.Structure):
-    _fields_ = [("Hint", ctypes.c_uint16), ("Name", ctypes.c_char * 12)]
+class IMAGE_IMPORT_BY_NAME(Structure):
+    """
+    This class implements the structure to parses imports names.
+    """
+
+    _fields_ = [("Hint", c_uint16), ("Name", c_char * 12)]
 
 
-class IMAGE_THUNK_DATA_UNION64(ctypes.Union):
+class IMAGE_THUNK_DATA_UNION64(Union):
+    """
+    This class implements the union to access x64 imports values.
+    """
+
     _fields_ = [
-        ("Function", ctypes.c_uint64),
-        ("Ordinal", ctypes.c_uint64),
-        ("AddressOfData", ctypes.c_uint64),
-        ("ForwarderString", ctypes.c_uint64),
+        ("Function", c_uint64),
+        ("Ordinal", c_uint64),
+        ("AddressOfData", c_uint64),
+        ("ForwarderString", c_uint64),
     ]
 
 
-class IMAGE_THUNK_DATA_UNION32(ctypes.Union):
+class IMAGE_THUNK_DATA_UNION32(Union):
+    """
+    This class implements the union to access x84 imports values.
+    """
+
     _fields_ = [
-        ("Function", ctypes.c_uint32),
-        ("Ordinal", ctypes.c_uint32),
-        ("AddressOfData", ctypes.c_uint32),
-        ("ForwarderString", ctypes.c_uint32),
+        ("Function", c_uint32),
+        ("Ordinal", c_uint32),
+        ("AddressOfData", c_uint32),
+        ("ForwarderString", c_uint32),
     ]
 
 
-class IMAGE_THUNK_DATA64(ctypes.Structure):
+class IMAGE_THUNK_DATA64(Structure):
+    """
+    This class implements the structure to parses the x64 imports values.
+    """
+
     _fields_ = [("u1", IMAGE_THUNK_DATA_UNION64)]
 
 
-class IMAGE_THUNK_DATA32(ctypes.Structure):
+class IMAGE_THUNK_DATA32(Structure):
+    """
+    This class implements the structure to parses the x86 imports values.
+    """
+
     _fields_ = [("u1", IMAGE_THUNK_DATA_UNION32)]
 
 
-class IMAGE_BASE_RELOCATION(ctypes.Structure):
+class IMAGE_BASE_RELOCATION(Structure):
+    """
+    This class implements the structure to parses relocations.
+    """
+
     _fields_ = [
-        ("VirtualAddress", ctypes.c_uint32),
-        ("SizeOfBlock", ctypes.c_uint32),
+        ("VirtualAddress", c_uint32),
+        ("SizeOfBlock", c_uint32),
     ]
 
 
 @dataclass
 class PeHeaders:
+    """
+    This dataclass store the PE Headers useful values.
+    """
+
     dos: IMAGE_DOS_HEADER
     nt: IMAGE_NT_HEADERS
     file: IMAGE_FILE_HEADER
-    optional: Union[IMAGE_OPTIONAL_HEADER32, IMAGE_OPTIONAL_HEADER64]
+    optional: UnionType[IMAGE_OPTIONAL_HEADER32, IMAGE_OPTIONAL_HEADER64]
     sections: IMAGE_SECTION_HEADER * 1
     arch: int
+
+
+@dataclass
+class ImportFunction:
+    """
+    This dataclass store informations about a import function.
+    """
+
+    name: UnionType[int, str]
+    module_name: str
+    module: int
+    address: int
+    import_address: int
+    hook: Callable = None
 
 
 IMAGE_REL_BASED_ABSOLUTE = 0
@@ -298,55 +399,53 @@ PAGE_GUARD = 0x100
 PAGE_NOCACHE = 0x200
 PAGE_WRITECOMBINE = 0x400
 
-kernel32 = ctypes.windll.kernel32
+kernel32 = windll.kernel32
 
 VirtualAlloc = kernel32.VirtualAlloc
-VirtualAlloc.restype = ctypes.c_void_p
+VirtualAlloc.restype = c_void_p
 VirtualAlloc.argtypes = [
-    ctypes.c_void_p,
-    ctypes.c_size_t,
-    ctypes.c_ulong,
-    ctypes.c_ulong,
+    c_void_p,
+    c_size_t,
+    c_ulong,
+    c_ulong,
 ]
 
 VirtualProtect = kernel32.VirtualProtect
-VirtualProtect.restype = ctypes.c_bool
+VirtualProtect.restype = c_bool
 VirtualProtect.argtypes = [
-    ctypes.c_void_p,
-    ctypes.c_size_t,
-    ctypes.c_ulong,
-    ctypes.POINTER(ctypes.c_ulong),
+    c_void_p,
+    c_size_t,
+    c_ulong,
+    POINTER(c_ulong),
 ]
 
 LoadLibraryA = kernel32.LoadLibraryA
-LoadLibraryA.restype = wintypes.HMODULE
-LoadLibraryA.argtypes = [wintypes.LPCSTR]
+LoadLibraryA.restype = HMODULE
+LoadLibraryA.argtypes = [LPCSTR]
 
 GetProcAddress = kernel32.GetProcAddress
-GetProcAddress.restype = ctypes.c_void_p
-GetProcAddress.argtypes = [wintypes.HMODULE, wintypes.LPCSTR]
+GetProcAddress.restype = c_void_p
+GetProcAddress.argtypes = [HMODULE, LPCSTR]
 
 
-def load_struct_from_bytes(struct: type, data: bytes) -> ctypes.Structure:
+def load_struct_from_bytes(struct: type, data: bytes) -> Structure:
     """
     This function returns a ctypes structure
     build from bytes sent in arguments.
     """
 
     instance = struct()
-    ctypes.memmove(ctypes.pointer(instance), data, ctypes.sizeof(instance))
+    memmove(pointer(instance), data, sizeof(instance))
     return instance
 
 
-def load_struct_from_file(
-    struct: type, file: _BufferedIOBase
-) -> ctypes.Structure:
+def load_struct_from_file(struct: type, file: _BufferedIOBase) -> Structure:
     """
     This function returns a ctypes structure
     build from memory address sent in arguments.
     """
 
-    return load_struct_from_bytes(struct, file.read(ctypes.sizeof(struct)))
+    return load_struct_from_bytes(struct, file.read(sizeof(struct)))
 
 
 def get_data_from_memory(position: int, size: int) -> bytes:
@@ -354,20 +453,20 @@ def get_data_from_memory(position: int, size: int) -> bytes:
     This function returns bytes from memory address and size.
     """
 
-    buffer = (ctypes.c_byte * size)()
-    ctypes.memmove(buffer, position, size)
+    buffer = (c_byte * size)()
+    memmove(buffer, position, size)
     return bytes(buffer)
 
 
 def read_array_structure_until_0(
     position: int, structure: type
-) -> Iterable[Tuple[ctypes.Structure]]:
+) -> Iterable[Tuple[Structure]]:
     """
     This function generator yields ctypes structures from memory
     until last element contains only NULL bytes.
     """
 
-    size = ctypes.sizeof(structure)
+    size = sizeof(structure)
     index = 0
     data = get_data_from_memory(position, size)
     while data != (b"\0" * size):
@@ -391,7 +490,7 @@ def load_headers(file: _BufferedIOBase) -> PeHeaders:
         optional_header = nt_headers.OptionalHeader
         arch = 32
     elif file_header.Machine == 0x8664:  # IMAGE_FILE_MACHINE_AMD64
-        file.seek(ctypes.sizeof(IMAGE_OPTIONAL_HEADER32) * -1, 1)
+        file.seek(sizeof(IMAGE_OPTIONAL_HEADER32) * -1, 1)
         optional_header = load_struct_from_file(IMAGE_OPTIONAL_HEADER64, file)
         arch = 64
 
@@ -421,10 +520,10 @@ def load_in_memory(file: _BufferedIOBase, pe_headers: PeHeaders) -> int:
         MEM_RESERVE | MEM_COMMIT,
         PAGE_READWRITE,
     )
-    old_permissions = wintypes.DWORD(0)
+    old_permissions = DWORD(0)
 
     file.seek(0)
-    ctypes.memmove(
+    memmove(
         ImageBase,
         file.read(pe_headers.optional.SizeOfHeaders),
         pe_headers.optional.SizeOfHeaders,
@@ -433,20 +532,20 @@ def load_in_memory(file: _BufferedIOBase, pe_headers: PeHeaders) -> int:
         ImageBase,
         pe_headers.optional.SizeOfHeaders,
         PAGE_READONLY,
-        ctypes.byref(old_permissions),
+        byref(old_permissions),
     )
 
     for section in pe_headers.sections:
         position = ImageBase + section.VirtualAddress
         if section.SizeOfRawData > 0:
             file.seek(section.PointerToRawData)
-            ctypes.memmove(
+            memmove(
                 position,
                 file.read(section.SizeOfRawData),
                 section.SizeOfRawData,
             )
         else:
-            ctypes.memset(position, 0, section.Misc)
+            memset(position, 0, section.Misc)
 
         if (
             section.Characteristics & 0xE0000000 == 0xE0000000
@@ -465,12 +564,12 @@ def load_in_memory(file: _BufferedIOBase, pe_headers: PeHeaders) -> int:
         ):  # IMAGE_SCN_MEM_READ
             new_permissions = PAGE_READONLY
 
-        old_permissions = wintypes.DWORD(0)
+        old_permissions = DWORD(0)
         result = VirtualProtect(
             position,
             section.Misc,
             new_permissions,
-            ctypes.byref(old_permissions),
+            byref(old_permissions),
         )
 
     return ImageBase
@@ -478,13 +577,13 @@ def load_in_memory(file: _BufferedIOBase, pe_headers: PeHeaders) -> int:
 
 def get_functions(
     ImageBase: int, position: int, struct: type
-) -> Iterable[Tuple[int, int]]: # wintypes.LPCSTR
+) -> Iterable[Tuple[int, int]]:  # LPCSTR
     """
     This function loads the PE program in memory
     using the file and all PE headers.
     """
 
-    size_import_name = ctypes.sizeof(IMAGE_IMPORT_BY_NAME)
+    size_import_name = sizeof(IMAGE_IMPORT_BY_NAME)
 
     for index, thunk_data in read_array_structure_until_0(
         ImageBase + position, struct
@@ -494,10 +593,12 @@ def get_functions(
             data = get_data_from_memory(ImageBase + address, size_import_name)
             import_by_name = load_struct_from_bytes(IMAGE_IMPORT_BY_NAME, data)
             address = ImageBase + address + IMAGE_IMPORT_BY_NAME.Name.offset
-        yield index, address # wintypes.LPCSTR(address)
+        yield index, address  # LPCSTR(address)
 
 
-def load_imports(pe_headers: PeHeaders, ImageBase: int) -> None:
+def load_imports(
+    pe_headers: PeHeaders, ImageBase: int
+) -> List[ImportFunction]:
     """
     This function loads imports (DLL, libraries), finds the functions addresses
     and write them in the IAT (Import Address Table).
@@ -510,37 +611,42 @@ def load_imports(pe_headers: PeHeaders, ImageBase: int) -> None:
         ].VirtualAddress
     )
     type_ = IMAGE_THUNK_DATA64 if pe_headers.arch == 64 else IMAGE_THUNK_DATA32
-    size_thunk = ctypes.sizeof(type_)
-    size_pointer = ctypes.sizeof(type_)
+    size_thunk = sizeof(type_)
+    size_pointer = sizeof(type_)
+    imports = []
 
     for index, import_descriptor in read_array_structure_until_0(
         position, IMAGE_IMPORT_DESCRIPTOR
     ):
-        module = LoadLibraryA(
-            wintypes.LPCSTR(ImageBase + import_descriptor.Name)
-        )
+        module_name = LPCSTR(ImageBase + import_descriptor.Name)
+        module_name_string = module_name.value.decode()
+        module = LoadLibraryA(module_name)
         if not module:
             raise ImportError(
-                "Cannot load the library for import: " + str(index)
+                "Failed to load the library: " + module_name_string
             )
 
         for counter, function in get_functions(
             ImageBase, import_descriptor.Misc.OriginalFirstThunk, type_
         ):
-            address = GetProcAddress(
-                module, wintypes.LPCSTR(function & 0x7fffffffffffffff)
+            function_name = LPCSTR(function & 0x7FFFFFFFFFFFFFFF)
+            function_name_string = (
+                (function & 0x7FFFFFFFFFFFFFFF)
+                if function & 0x8000000000000000
+                else function_name.value.decode()
             )
+            address = GetProcAddress(module, function_name)
             function_position = (
                 ImageBase + import_descriptor.FirstThunk + size_thunk * counter
             )
-            old_permissions = wintypes.DWORD(0)
+            old_permissions = DWORD(0)
             result = VirtualProtect(
                 function_position,
                 size_pointer,
                 PAGE_READWRITE,
-                ctypes.byref(old_permissions),
+                byref(old_permissions),
             )
-            ctypes.memmove(
+            memmove(
                 function_position,
                 address.to_bytes(size_pointer, "little"),
                 size_pointer,
@@ -549,8 +655,20 @@ def load_imports(pe_headers: PeHeaders, ImageBase: int) -> None:
                 function_position,
                 size_pointer,
                 old_permissions,
-                ctypes.byref(old_permissions),
+                byref(old_permissions),
             )
+
+            imports.append(
+                ImportFunction(
+                    function_name_string,
+                    module_name_string,
+                    module,
+                    address,
+                    function_position,
+                )
+            )
+
+    return imports
 
 
 def load_relocations(pe_headers: PeHeaders, ImageBase: int) -> None:
@@ -569,7 +687,7 @@ def load_relocations(pe_headers: PeHeaders, ImageBase: int) -> None:
         return None
 
     type_ = IMAGE_THUNK_DATA64 if pe_headers.arch == 64 else IMAGE_THUNK_DATA32
-    size_pointer = ctypes.sizeof(type_)
+    size_pointer = sizeof(type_)
 
     position = (
         ImageBase
@@ -577,18 +695,16 @@ def load_relocations(pe_headers: PeHeaders, ImageBase: int) -> None:
             IMAGE_DIRECTORY_ENTRY_BASERELOC
         ].VirtualAddress
     )
-    size = ctypes.sizeof(IMAGE_BASE_RELOCATION)
+    size = sizeof(IMAGE_BASE_RELOCATION)
     data = get_data_from_memory(position, size)
 
     while data != (b"\0" * size):
         base_relocation = load_struct_from_bytes(IMAGE_BASE_RELOCATION, data)
         block_size = (
-            base_relocation.SizeOfBlock - ctypes.sizeof(IMAGE_BASE_RELOCATION)
+            base_relocation.SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)
         ) // 2
 
-        for reloc in (ctypes.c_uint16 * block_size).from_address(
-            position + size
-        ):
+        for reloc in (c_uint16 * block_size).from_address(position + size):
             type_ = reloc >> 12
             offset = reloc & 0x0FFF
             address = ImageBase + base_relocation.VirtualAddress + offset
@@ -600,14 +716,14 @@ def load_relocations(pe_headers: PeHeaders, ImageBase: int) -> None:
                 static_address = int.from_bytes(
                     get_data_from_memory(address, size_pointer), "little"
                 )
-                old_permissions = wintypes.DWORD(0)
+                old_permissions = DWORD(0)
                 result = VirtualProtect(
                     address,
                     size_pointer,
                     PAGE_READWRITE,
-                    ctypes.byref(old_permissions),
+                    byref(old_permissions),
                 )
-                ctypes.memmove(
+                memmove(
                     address,
                     (static_address + delta).to_bytes(size_pointer, "little"),
                     size_pointer,
@@ -616,7 +732,7 @@ def load_relocations(pe_headers: PeHeaders, ImageBase: int) -> None:
                     address,
                     size_pointer,
                     old_permissions,
-                    ctypes.byref(old_permissions),
+                    byref(old_permissions),
                 )
 
         data = get_data_from_memory(
@@ -637,7 +753,7 @@ def load(file: _BufferedIOBase) -> None:
     load_imports(pe_headers, image_base)
     load_relocations(pe_headers, image_base)
 
-    function_type = ctypes.CFUNCTYPE(ctypes.c_int)
+    function_type = CFUNCTYPE(c_int)
     function = function_type(
         image_base + pe_headers.optional.AddressOfEntryPoint
     )
