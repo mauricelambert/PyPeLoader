@@ -25,7 +25,7 @@ This package implements a basic PE loader in python to
 load executables in memory.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "Maurice Lambert"
 __author_email__ = "mauricelambert434@gmail.com"
 __maintainer__ = "Maurice Lambert"
@@ -42,6 +42,7 @@ __all__ = [
     "load_headers",
     "load_in_memory",
     "load_imports",
+    'get_imports',
     "load_relocations",
     "ImportFunction",
 ]
@@ -361,7 +362,9 @@ class ImportFunction:
     module: int
     address: int
     import_address: int
+    module_container: str
     hook: Callable = None
+    count_call: int = 0
 
 
 IMAGE_REL_BASED_ABSOLUTE = 0
@@ -596,23 +599,28 @@ def get_functions(
         yield index, address  # LPCSTR(address)
 
 
-def load_imports(
-    pe_headers: PeHeaders, ImageBase: int
+def get_imports(
+    pe_headers: PeHeaders, ImageBase: int, module_container: str
 ) -> List[ImportFunction]:
-    """
-    This function loads imports (DLL, libraries), finds the functions addresses
-    and write them in the IAT (Import Address Table).
-    """
+    '''
+    This function returns imports for a in memory module,
+    this function loads modules (DLL) when is not loaded to get
+    the module address and functions addresses required
+    in the ImportFunction.
+    '''
+
+    rva = pe_headers.optional.DataDirectory[
+        IMAGE_DIRECTORY_ENTRY_IMPORT
+    ].VirtualAddress
+    if rva == 0:
+        return []
 
     position = (
         ImageBase
-        + pe_headers.optional.DataDirectory[
-            IMAGE_DIRECTORY_ENTRY_IMPORT
-        ].VirtualAddress
+        + rva
     )
     type_ = IMAGE_THUNK_DATA64 if pe_headers.arch == 64 else IMAGE_THUNK_DATA32
     size_thunk = sizeof(type_)
-    size_pointer = sizeof(type_)
     imports = []
 
     for index, import_descriptor in read_array_structure_until_0(
@@ -621,6 +629,7 @@ def load_imports(
         module_name = LPCSTR(ImageBase + import_descriptor.Name)
         module_name_string = module_name.value.decode()
         module = LoadLibraryA(module_name)
+
         if not module:
             raise ImportError(
                 "Failed to load the library: " + module_name_string
@@ -630,32 +639,15 @@ def load_imports(
             ImageBase, import_descriptor.Misc.OriginalFirstThunk, type_
         ):
             function_name = LPCSTR(function & 0x7FFFFFFFFFFFFFFF)
+            address = GetProcAddress(module, function_name)
             function_name_string = (
                 (function & 0x7FFFFFFFFFFFFFFF)
                 if function & 0x8000000000000000
                 else function_name.value.decode()
             )
-            address = GetProcAddress(module, function_name)
+
             function_position = (
                 ImageBase + import_descriptor.FirstThunk + size_thunk * counter
-            )
-            old_permissions = DWORD(0)
-            result = VirtualProtect(
-                function_position,
-                size_pointer,
-                PAGE_READWRITE,
-                byref(old_permissions),
-            )
-            memmove(
-                function_position,
-                address.to_bytes(size_pointer, "little"),
-                size_pointer,
-            )
-            result = VirtualProtect(
-                function_position,
-                size_pointer,
-                old_permissions,
-                byref(old_permissions),
             )
 
             imports.append(
@@ -665,10 +657,42 @@ def load_imports(
                     module,
                     address,
                     function_position,
+                    module_container,
                 )
             )
 
     return imports
+
+def load_imports(functions: List[ImportFunction]) -> None:
+    """
+    This function loads imports (DLL, libraries), finds the functions addresses
+    and write them in the IAT (Import Address Table).
+    """
+
+    if not functions:
+        return None
+
+    size_pointer = sizeof(c_uint64 if functions[0].import_address > 0xffffffff else c_uint32)
+
+    for function in functions:
+        old_permissions = DWORD(0)
+        result = VirtualProtect(
+            function.import_address,
+            size_pointer,
+            PAGE_READWRITE,
+            byref(old_permissions),
+        )
+        memmove(
+            function.import_address,
+            function.address.to_bytes(size_pointer, "little"),
+            size_pointer,
+        )
+        result = VirtualProtect(
+            function.import_address,
+            size_pointer,
+            old_permissions,
+            byref(old_permissions),
+        )
 
 
 def load_relocations(pe_headers: PeHeaders, ImageBase: int) -> None:
@@ -750,7 +774,7 @@ def load(file: _BufferedIOBase) -> None:
     image_base = load_in_memory(file, pe_headers)
     file.close()
 
-    load_imports(pe_headers, image_base)
+    load_imports(get_imports(pe_headers, image_base, 'target'))
     load_relocations(pe_headers, image_base)
 
     function_type = CFUNCTYPE(c_int)

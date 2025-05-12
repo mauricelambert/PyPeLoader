@@ -1,6 +1,6 @@
 Metadata-Version: 2.2
 Name: PyPeLoader
-Version: 0.1.0
+Version: 0.2.0
 Summary: This package implements a basic PE loader in python to load executables in memory.
 Home-page: https://github.com/mauricelambert/PyPeLoader
 Download-URL: https://mauricelambert.github.io/info/python/security/PyPeLoader.pyz
