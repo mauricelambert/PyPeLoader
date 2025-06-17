@@ -1,9 +1,9 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='PyPeLoader',
-    version='0.2.0',
-    py_modules=['PyPeLoader'],
+    name="PyPeLoader",
+    version="0.3.0",
+    py_modules=["PyPeLoader"],
     packages=find_packages(include=[]),
     install_requires=[],
     scripts=[],
@@ -11,8 +11,8 @@ setup(
     author_email="mauricelambert434@gmail.com",
     maintainer="Maurice Lambert",
     maintainer_email="mauricelambert434@gmail.com",
-    description='This package implements a basic PE loader in python to load executables in memory.',
-    long_description=open('README.md').read(),
+    description="This package implements a basic PE loader in python to load executables in memory.",
+    long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/mauricelambert/PyPeLoader",
     project_urls={
@@ -33,19 +33,32 @@ setup(
         "Intended Audience :: Developers",
         "Topic :: System :: System Shells",
         "Programming Language :: Python :: 3.8",
-        'Operating System :: Microsoft :: Windows',
+        "Operating System :: Microsoft :: Windows",
         "Topic :: System :: Systems Administration",
         "Intended Audience :: System Administrators",
         "Development Status :: 5 - Production/Stable",
         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     ],
-    keywords=['PeLoader', 'Loader', 'Linker', 'WindowsLinker', 'Packer', 'MemoryExecution', 'AntivirusBypass', 'Antivirus', 'Bypass', 'Hooks', 'Win32', 'WinAPI', 'reverse', 'malware-reverse'],
-    platforms=['Windows'],
+    keywords=[
+        "PeLoader",
+        "Loader",
+        "Linker",
+        "WindowsLinker",
+        "Packer",
+        "MemoryExecution",
+        "AntivirusBypass",
+        "Antivirus",
+        "Bypass",
+        "Hooks",
+        "Win32",
+        "WinAPI",
+        "reverse",
+        "malware-reverse",
+    ],
+    platforms=["Windows"],
     license="GPL-3.0 License",
-    entry_points = {
-        'console_scripts': [
-            'PyPeLoader = PyPeLoader:main'
-        ],
+    entry_points={
+        "console_scripts": ["PyPeLoader = PyPeLoader:main"],
     },
-    python_requires='>=3.8',
+    python_requires=">=3.8",
 )

@@ -25,7 +25,7 @@ This package implements a basic PE loader in python to
 load executables in memory.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __author__ = "Maurice Lambert"
 __author_email__ = "mauricelambert434@gmail.com"
 __maintainer__ = "Maurice Lambert"
@@ -42,7 +42,7 @@ __all__ = [
     "load_headers",
     "load_in_memory",
     "load_imports",
-    'get_imports',
+    "get_imports",
     "load_relocations",
     "ImportFunction",
 ]
@@ -402,6 +402,8 @@ PAGE_GUARD = 0x100
 PAGE_NOCACHE = 0x200
 PAGE_WRITECOMBINE = 0x400
 
+IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE = 0x0040
+
 kernel32 = windll.kernel32
 
 VirtualAlloc = kernel32.VirtualAlloc
@@ -511,21 +513,48 @@ def load_headers(file: _BufferedIOBase) -> PeHeaders:
     )
 
 
+def allocate_memory_image(pe_headers: PeHeaders) -> int:
+    """
+    This function allocates memory for executable image.
+    """
+
+    relocation = (
+        pe_headers.optional.DllCharacteristics
+        & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE
+    )
+    relocation = (
+        relocation
+        and pe_headers.optional.DataDirectory[
+            IMAGE_DIRECTORY_ENTRY_BASERELOC
+        ].VirtualAddress
+        and pe_headers.optional.DataDirectory[
+            IMAGE_DIRECTORY_ENTRY_BASERELOC
+        ].Size
+    )
+
+    ImageBase = VirtualAlloc(
+        None if relocation else pe_headers.optional.ImageBase,
+        pe_headers.optional.SizeOfImage,
+        MEM_RESERVE | MEM_COMMIT,
+        PAGE_READWRITE,
+    )
+
+    if not ImageBase:
+        raise RuntimeError("Failed to allocate memory for executable image.")
+
+    return ImageBase
+
+
 def load_in_memory(file: _BufferedIOBase, pe_headers: PeHeaders) -> int:
     """
     This function loads the PE program in memory
     using the file and all PE headers.
     """
 
-    ImageBase = VirtualAlloc(
-        None,
-        pe_headers.optional.SizeOfImage,
-        MEM_RESERVE | MEM_COMMIT,
-        PAGE_READWRITE,
-    )
+    ImageBase = allocate_memory_image(pe_headers)
     old_permissions = DWORD(0)
-
     file.seek(0)
+
     memmove(
         ImageBase,
         file.read(pe_headers.optional.SizeOfHeaders),
@@ -602,12 +631,12 @@ def get_functions(
 def get_imports(
     pe_headers: PeHeaders, ImageBase: int, module_container: str
 ) -> List[ImportFunction]:
-    '''
+    """
     This function returns imports for a in memory module,
     this function loads modules (DLL) when is not loaded to get
     the module address and functions addresses required
     in the ImportFunction.
-    '''
+    """
 
     rva = pe_headers.optional.DataDirectory[
         IMAGE_DIRECTORY_ENTRY_IMPORT
@@ -615,10 +644,7 @@ def get_imports(
     if rva == 0:
         return []
 
-    position = (
-        ImageBase
-        + rva
-    )
+    position = ImageBase + rva
     type_ = IMAGE_THUNK_DATA64 if pe_headers.arch == 64 else IMAGE_THUNK_DATA32
     size_thunk = sizeof(type_)
     imports = []
@@ -663,6 +689,7 @@ def get_imports(
 
     return imports
 
+
 def load_imports(functions: List[ImportFunction]) -> None:
     """
     This function loads imports (DLL, libraries), finds the functions addresses
@@ -672,7 +699,9 @@ def load_imports(functions: List[ImportFunction]) -> None:
     if not functions:
         return None
 
-    size_pointer = sizeof(c_uint64 if functions[0].import_address > 0xffffffff else c_uint32)
+    size_pointer = sizeof(
+        c_uint64 if functions[0].import_address > 0xFFFFFFFF else c_uint32
+    )
 
     for function in functions:
         old_permissions = DWORD(0)
@@ -774,7 +803,7 @@ def load(file: _BufferedIOBase) -> None:
     image_base = load_in_memory(file, pe_headers)
     file.close()
 
-    load_imports(get_imports(pe_headers, image_base, 'target'))
+    load_imports(get_imports(pe_headers, image_base, "target"))
     load_relocations(pe_headers, image_base)
 
     function_type = CFUNCTYPE(c_int)
