@@ -4,12 +4,12 @@
 
 ## Description
 
-This package implements a basic PE loader in python (can load simple
-executable like calc.exe, net1.exe, little malwares...)
+This package implements a basic PE loader in python to load executable in memory (used to create packer, loader from internet or to impact a process context).
 
 ## Requirements
 
 This package require:
+
  - python3
  - python3 Standard Library
 
@@ -57,16 +57,26 @@ python3 -m PyPeLoader   # Using python module
 python3 PyPeLoader.pyz  # Using python executable
 PyPeLoader.exe          # Using python Windows executable
 
-PyPeLoader.exe "C:\Windows\System32\net1.exe" "C:\Windows\System32\calc.exe"
+PyPeLoader.exe "C:\Windows\System32\net1.exe" "net user"
 ```
 
 ### Python script
 
 ```python
-from PyPeLoader import load
+from PyPeLoader import load, get_peb, modify_process_informations, modify_executable_path_name, set_command_lines
 
-load(r'C:\Windows\System32\net1.exe') # for 32 bits python version use: C:\Windows\SysWOW64\net1.exe
-load(r'C:\Windows\System32\calc.exe') # for 32 bits python version use: C:\Windows\SysWOW64\calc.exe
+full_path = r"C:\Windows\System32\net1.exe"
+module_name = "net1.exe"
+command_line = "net user"
+
+peb = get_peb()
+
+modify_process_informations(peb, full_path, command_line)
+modify_executable_path_name(peb, module_name, full_path)
+set_command_lines(command_line)
+
+with open(full_path, 'rb') as file:
+    load(file) # for 32 bits python version use: C:\Windows\SysWOW64\net1.exe
 ```
 
 ## Links

@@ -25,7 +25,7 @@ This package implements a basic PE loader in python to
 load executables in memory.
 """
 
-__version__ = "0.3.0"
+__version__ = "1.0.0"
 __author__ = "Maurice Lambert"
 __author_email__ = "mauricelambert434@gmail.com"
 __maintainer__ = "Maurice Lambert"
@@ -45,6 +45,10 @@ __all__ = [
     "get_imports",
     "load_relocations",
     "ImportFunction",
+    "get_peb",
+    "modify_process_informations",
+    "modify_executable_path_name",
+    "set_command_lines",
 ]
 
 __license__ = "GPL-3.0 License"
@@ -57,34 +61,60 @@ under certain conditions.
 copyright = __copyright__
 license = __license__
 
-print(copyright)
-
 from ctypes import (
+    LittleEndianStructure,
     Structure,
     Union,
+    WinDLL,
+    WinError,
+    get_last_error,
+    wstring_at,
+    cast,
     memmove,
     memset,
     sizeof,
+    addressof,
     byref,
     pointer,
     POINTER,
     CFUNCTYPE,
     windll,
+    c_ubyte,
     c_byte,
     c_int,
     c_uint32,
     c_uint16,
     c_uint64,
     c_uint8,
+    c_long,
     c_ulong,
+    c_ulonglong,
     c_void_p,
+    create_unicode_buffer,
+    create_string_buffer,
     c_char,
+    c_wchar_p,
     c_size_t,
     c_bool,
 )
+from ctypes.wintypes import (
+    LPVOID,
+    LPCVOID,
+    HMODULE,
+    HANDLE,
+    LARGE_INTEGER,
+    DWORD,
+    ULONG,
+    USHORT,
+    BYTE,
+    BOOL,
+    LPCWSTR,
+    LPCSTR,
+    LPWSTR,
+)
 from typing import Union as UnionType, Tuple, Iterable, List, Callable
-from ctypes.wintypes import HMODULE, LPCSTR, DWORD
-from sys import argv, executable, exit
+from sys import argv, executable, exit, stderr
+from os.path import isfile, basename, abspath
 from dataclasses import dataclass
 from _io import _BufferedIOBase
 
@@ -337,6 +367,361 @@ class IMAGE_BASE_RELOCATION(Structure):
     ]
 
 
+ULONG_PTR = c_uint64
+SIZE_T = c_size_t
+PVOID = c_void_p
+
+
+class LIST_ENTRY(Structure):
+    """
+    This class implements the structure to parse
+    modules list in memory.
+    """
+
+    # _fields_ = [("Flink", PVOID), ("Blink", PVOID)]
+
+
+LIST_ENTRY._fields_ = [
+    ("Flink", POINTER(LIST_ENTRY)),
+    ("Blink", POINTER(LIST_ENTRY)),
+]
+
+
+class PEB_LDR_DATA(Structure):
+    """
+    This class implements the structure
+    where modules list are stored.
+    """
+
+    _fields_ = [
+        ("Length", ULONG),
+        ("Initialized", BOOL),
+        ("SsHandle", c_void_p),
+        ("InLoadOrderModuleList", LIST_ENTRY),
+        ("InMemoryOrderModuleList", LIST_ENTRY),
+        ("InInitializationOrderModuleList", LIST_ENTRY),
+        ("EntryInProgress", c_void_p),
+        ("ShutdownInProgress", BOOL),
+        ("ShutdownThreadId", c_void_p),
+    ]
+
+
+class LeapSecondFlagsBits(LittleEndianStructure):
+    """
+    This class implements a structure in the PEB.
+    """
+
+    _fields_ = [
+        ("SixtySecondEnabled", ULONG, 1),
+        ("Reserved", ULONG, 31),
+    ]
+
+
+class LeapSecondFlagsUnion(Union):
+    """
+    This class implements a structure in the PEB.
+    """
+
+    _anonymous_ = ("Bits",)
+    _fields_ = [
+        ("Value", ULONG),
+        ("Bits", LeapSecondFlagsBits),
+    ]
+
+
+class TracingFlagsBits(LittleEndianStructure):
+    """
+    This class implements a structure in the PEB.
+    """
+
+    _fields_ = [
+        ("HeapTracingEnabled", ULONG, 1),
+        ("CritSecTracingEnabled", ULONG, 1),
+        ("LibLoaderTracingEnabled", ULONG, 1),
+        ("SpareTracingBits", ULONG, 29),
+    ]
+
+
+class TracingFlagsUnion(Union):
+    """
+    This class implements a structure in the PEB.
+    """
+
+    _anonymous_ = ("Bits",)
+    _fields_ = [
+        ("Value", ULONG),
+        ("Bits", TracingFlagsBits),
+    ]
+
+
+class CallbackTableUnion(Union):
+    """
+    This class implements a structure in the PEB.
+    """
+
+    _fields_ = [
+        ("KernelCallbackTable", c_void_p),
+        ("UserSharedInfoPtr", c_void_p),
+    ]
+
+
+class BitFieldBits(LittleEndianStructure):
+    """
+    This class implements a structure in the PEB.
+    """
+
+    _fields_ = [
+        ("ImageUsesLargePages", BYTE, 1),
+        ("IsProtectedProcess", BYTE, 1),
+        ("IsLegacyProcess", BYTE, 1),
+        ("IsImageDynamicallyRelocated", BYTE, 1),
+        ("SkipPatchingUser32Forwarders", BYTE, 1),
+        ("SpareBits", BYTE, 3),
+    ]
+
+
+class BitFieldUnion(Union):
+    """
+    This class implements a structure in the PEB.
+    """
+
+    _anonymous_ = ("Bits",)
+    _fields_ = [
+        ("Value", BYTE),
+        ("Bits", BitFieldBits),
+    ]
+
+
+class CrossProcessFlagsBits(LittleEndianStructure):
+    """
+    This class implements a structure in the PEB.
+    """
+
+    _fields_ = [
+        ("ProcessInJob", ULONG, 1),
+        ("ProcessInitializing", ULONG, 1),
+        ("ProcessUsingVEH", ULONG, 1),
+        ("ProcessUsingVCH", ULONG, 1),
+        ("ProcessUsingFTH", ULONG, 1),
+        ("ReservedBits0", ULONG, 27),
+    ]
+
+
+class CrossProcessFlagsUnion(Union):
+    """
+    This class implements a structure in the PEB.
+    """
+
+    _anonymous_ = ("Bits",)
+    _fields_ = [
+        ("Value", ULONG),
+        ("Bits", CrossProcessFlagsBits),
+    ]
+
+
+class UNICODE_STRING(Structure):
+    """
+    This class implements the unicode strings to get
+    Windows internal strings in memory.
+    """
+
+    _fields_ = [
+        ("Length", USHORT),
+        ("MaximumLength", USHORT),
+        ("Buffer", LPWSTR),
+    ]
+
+
+class RTL_USER_PROCESS_PARAMETERS(Structure):
+    """
+    This class implements a structure to parse user paramaters
+    like command line and executable full path.
+    """
+
+    _fields_ = [
+        ("MaximumLength", ULONG),
+        ("Length", ULONG),
+        ("Flags", ULONG),
+        ("DebugFlags", ULONG),
+        ("ConsoleHandle", HANDLE),
+        ("ConsoleFlags", ULONG),
+        ("StandardInput", HANDLE),
+        ("StandardOutput", HANDLE),
+        ("StandardError", HANDLE),
+        ("CurrentDirectoryPath", UNICODE_STRING),
+        ("CurrentDirectoryHandle", HANDLE),
+        ("DllPath", UNICODE_STRING),
+        ("ImagePathName", UNICODE_STRING),
+        ("CommandLine", UNICODE_STRING),
+        ("Environment", c_void_p),
+        ("StartingX", ULONG),
+        ("StartingY", ULONG),
+        ("CountX", ULONG),
+        ("CountY", ULONG),
+        ("CountCharsX", ULONG),
+        ("CountCharsY", ULONG),
+        ("FillAttribute", ULONG),
+        ("WindowFlags", ULONG),
+        ("ShowWindowFlags", ULONG),
+        ("WindowTitle", UNICODE_STRING),
+        ("DesktopInfo", UNICODE_STRING),
+        ("ShellInfo", UNICODE_STRING),
+        ("RuntimeData", UNICODE_STRING),
+        ("CurrentDirectories", c_byte * 0x40),  # maxlength ~32 or 64
+        ("EnvironmentSize", ULONG),
+        ("EnvironmentVersion", ULONG),
+        ("PackageDependencyData", c_void_p),
+        ("ProcessGroupId", ULONG),
+        ("LoaderThreads", ULONG),
+        ("RedirectionDllName", UNICODE_STRING),
+        ("HeapPartitionName", UNICODE_STRING),
+    ]
+
+
+class GDI_HANDLE_BUFFER(Structure):
+    """
+    This class implements a structure in the PEB.
+    """
+
+    _fields_ = [("Buffer", ULONG * 60)]  # 60 for 64-bit
+
+
+PRTL_USER_PROCESS_PARAMETERS = POINTER(RTL_USER_PROCESS_PARAMETERS)
+
+
+class PEB(Structure):
+    """
+    This class implements the PEB.
+    """
+
+    _anonymous_ = (
+        "BitField",
+        "CrossProcessFlags",
+        "CallbackTable",
+        "TracingFlags",
+        "LeapSecondFlags",
+    )
+    _fields_ = [
+        ("InheritedAddressSpace", BYTE),
+        ("ReadImageFileExecOptions", BYTE),
+        ("BeingDebugged", BYTE),
+        ("BitField", BitFieldUnion),
+        ("Mutant", HANDLE),
+        ("ImageBaseAddress", PVOID),
+        ("Ldr", POINTER(PEB_LDR_DATA)),
+        ("ProcessParameters", PRTL_USER_PROCESS_PARAMETERS),
+        ("SubSystemData", PVOID),
+        ("ProcessHeap", PVOID),
+        ("FastPebLock", PVOID),
+        ("AtlThunkSListPtr", PVOID),
+        ("IFEOKey", PVOID),
+        ("CrossProcessFlags", CrossProcessFlagsUnion),
+        ("CallbackTable", CallbackTableUnion),
+        ("SystemReserved", ULONG * 1),
+        ("AtlThunkSListPtr32", ULONG),
+        ("ApiSetMap", PVOID),
+        ("TlsExpansionCounter", ULONG),
+        ("TlsBitmap", PVOID),
+        ("TlsBitmapBits", ULONG * 2),
+        ("ReadOnlySharedMemoryBase", PVOID),
+        ("SharedData", PVOID),
+        ("ReadOnlyStaticServerData", PVOID),
+        ("AnsiCodePageData", PVOID),
+        ("OemCodePageData", PVOID),
+        ("UnicodeCaseTableData", PVOID),
+        ("NumberOfProcessors", ULONG),
+        ("NtGlobalFlag", ULONG),
+        ("CriticalSectionTimeout", LARGE_INTEGER),
+        ("HeapSegmentReserve", SIZE_T),
+        ("HeapSegmentCommit", SIZE_T),
+        ("HeapDeCommitTotalFreeThreshold", SIZE_T),
+        ("HeapDeCommitFreeBlockThreshold", SIZE_T),
+        ("NumberOfHeaps", ULONG),
+        ("MaximumNumberOfHeaps", ULONG),
+        ("ProcessHeaps", PVOID),
+        ("GdiSharedHandleTable", PVOID),
+        ("ProcessStarterHelper", PVOID),
+        ("GdiDCAttributeList", ULONG),
+        ("LoaderLock", PVOID),
+        ("OSMajorVersion", ULONG),
+        ("OSMinorVersion", ULONG),
+        ("OSBuildNumber", USHORT),
+        ("OSCSDVersion", USHORT),
+        ("OSPlatformId", ULONG),
+        ("ImageSubsystem", ULONG),
+        ("ImageSubsystemMajorVersion", ULONG),
+        ("ImageSubsystemMinorVersion", ULONG),
+        ("ActiveProcessAffinityMask", ULONG_PTR),
+        ("GdiHandleBuffer", GDI_HANDLE_BUFFER),
+        ("PostProcessInitRoutine", PVOID),
+        ("TlsExpansionBitmap", PVOID),
+        ("TlsExpansionBitmapBits", ULONG * 32),
+        ("SessionId", ULONG),
+        ("AppCompatFlags", c_ulonglong),
+        ("AppCompatFlagsUser", c_ulonglong),
+        ("pShimData", PVOID),
+        ("AppCompatInfo", PVOID),
+        ("CSDVersion", UNICODE_STRING),
+        ("ActivationContextData", PVOID),
+        ("ProcessAssemblyStorageMap", PVOID),
+        ("SystemDefaultActivationContextData", PVOID),
+        ("SystemAssemblyStorageMap", PVOID),
+        ("MinimumStackCommit", SIZE_T),
+        ("SparePointers", PVOID * 4),
+        ("SpareUlongs", ULONG * 5),
+        ("WerRegistrationData", PVOID),
+        ("WerShipAssertPtr", PVOID),
+        ("pUnused", PVOID),
+        ("pImageHeaderHash", PVOID),
+        ("TracingFlags", TracingFlagsUnion),
+        ("CsrServerReadOnlySharedMemoryBase", c_ulonglong),
+        ("TppWorkerpListLock", PVOID),
+        ("TppWorkerpList", LIST_ENTRY),
+        ("WaitOnAddressHashTable", PVOID * 128),
+        ("TelemetryCoverageHeader", PVOID),
+        ("CloudFileFlags", ULONG),
+        ("CloudFileDiagFlags", ULONG),
+        ("PlaceholderCompatibilityMode", BYTE),
+        ("PlaceholderCompatibilityModeReserved", BYTE * 7),
+        ("LeapSecondData", PVOID),
+        ("LeapSecondFlags", LeapSecondFlagsUnion),
+        ("NtGlobalFlag2", ULONG),
+    ]
+
+
+class LDR_DATA_TABLE_ENTRY(Structure):
+    """
+    This class contains informations about module and list
+    order to retrieves and identify modules in memory.
+    """
+
+    _fields_ = [
+        ("InLoadOrderLinks", LIST_ENTRY),
+        ("InMemoryOrderLinks", LIST_ENTRY),
+        ("InInitializationOrderLinks", LIST_ENTRY),
+        ("DllBase", PVOID),
+        ("EntryPoint", PVOID),
+        ("SizeOfImage", ULONG),
+        ("FullDllName", UNICODE_STRING),
+        ("BaseDllName", UNICODE_STRING),
+    ]
+
+
+class PROCESS_BASIC_INFORMATION(Structure):
+    """
+    This class implements the structure to get
+    the PEB from NtQueryInformationProcess.
+    """
+
+    _fields_ = [
+        ("Reserved1", c_void_p),
+        ("PebBaseAddress", c_void_p),
+        ("Reserved2", c_void_p * 2),
+        ("UniqueProcessId", c_void_p),
+        ("Reserved3", c_void_p),
+    ]
+
+
 @dataclass
 class PeHeaders:
     """
@@ -402,12 +787,42 @@ PAGE_GUARD = 0x100
 PAGE_NOCACHE = 0x200
 PAGE_WRITECOMBINE = 0x400
 
+PROCESS_BASIC_INFORMATION_TYPE = 0
+
 IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE = 0x0040
 
 kernel32 = windll.kernel32
+ntdll = WinDLL("ntdll")
+
+NTSTATUS = c_long
+
+NtQueryInformationProcess = ntdll.NtQueryInformationProcess
+NtQueryInformationProcess.argtypes = [
+    HANDLE,
+    ULONG,
+    c_void_p,
+    ULONG,
+    POINTER(ULONG),
+]
+NtQueryInformationProcess.restype = NTSTATUS
+
+GetCurrentProcess = kernel32.GetCurrentProcess
+GetCurrentProcess.restype = HANDLE
+
+GetModuleHandleW = kernel32.GetModuleHandleW
+GetModuleHandleW.argtypes = [LPCWSTR]
+GetModuleHandleW.restype = HMODULE
+
+LoadLibraryA = kernel32.LoadLibraryA
+LoadLibraryA.restype = HMODULE
+LoadLibraryA.argtypes = [LPCSTR]
+
+GetProcAddress = kernel32.GetProcAddress
+GetProcAddress.argtypes = [HMODULE, LPCSTR]
+GetProcAddress.restype = LPVOID
 
 VirtualAlloc = kernel32.VirtualAlloc
-VirtualAlloc.restype = c_void_p
+VirtualAlloc.restype = LPVOID
 VirtualAlloc.argtypes = [
     c_void_p,
     c_size_t,
@@ -424,13 +839,305 @@ VirtualProtect.argtypes = [
     POINTER(c_ulong),
 ]
 
-LoadLibraryA = kernel32.LoadLibraryA
-LoadLibraryA.restype = HMODULE
-LoadLibraryA.argtypes = [LPCSTR]
+ReadProcessMemory = kernel32.ReadProcessMemory
+ReadProcessMemory.argtypes = [
+    HANDLE,
+    LPCVOID,
+    LPVOID,
+    c_size_t,
+    POINTER(c_size_t),
+]
+ReadProcessMemory.restype = BOOL
 
-GetProcAddress = kernel32.GetProcAddress
-GetProcAddress.restype = c_void_p
-GetProcAddress.argtypes = [HMODULE, LPCSTR]
+WriteProcessMemory = kernel32.WriteProcessMemory
+WriteProcessMemory.restype = BOOL
+WriteProcessMemory.argtypes = [
+    HANDLE,            # hProcess
+    LPVOID,            # lpBaseAddress
+    LPCVOID,           # lpBuffer
+    c_size_t,          # nSize
+    POINTER(c_size_t)  # lpNumberOfBytesWritten
+]
+
+
+def get_peb() -> PEB:
+    """
+    This function gets PEB from NtQueryInformationProcess.
+    """
+
+    process_basic_information = PROCESS_BASIC_INFORMATION()
+    return_length = ULONG()
+
+    current_process = GetCurrentProcess()
+
+    status = NtQueryInformationProcess(
+        current_process,
+        PROCESS_BASIC_INFORMATION_TYPE,
+        byref(process_basic_information),
+        sizeof(process_basic_information),
+        byref(return_length),
+    )
+
+    if status != 0:
+        raise OSError("NtQueryInformationProcess failed")
+
+    return cast(
+        process_basic_information.PebBaseAddress, POINTER(PEB)
+    ).contents
+
+
+def make_writable(address: int, size: int) -> int:
+    """
+    This function modify permissions on a memory area.
+    """
+
+    old_protect = DWORD()
+    if not VirtualProtect(address, size, PAGE_READWRITE, byref(old_protect)):
+        raise OSError("VirtualProtect failed")
+    return old_protect.value
+
+
+def restore_protection(address: int, size: int, old_protect: int) -> None:
+    """
+    This function restore permissions on the memory area.
+    """
+
+    temp = DWORD()
+    VirtualProtect(address, size, old_protect, byref(temp))
+
+
+def modify_unicode_string_from_parent(
+    parent_address: POINTER, unicode_string_attribut_name: str, new_value: str
+) -> None:
+    """
+    This function modify a unicode strings attribut from a parent
+    structure pointer.
+    """
+
+    parent_structure = parent_address.contents
+    structure_size = sizeof(parent_structure)
+
+    string_size = len(new_value) * 2
+    size_in_bytes = string_size + 2
+
+    new_string_pointer = VirtualAlloc(
+        None, size_in_bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE
+    )
+    if not new_string_pointer:
+        raise WinError()
+
+    buffer = create_unicode_buffer(new_value)
+    memmove(new_string_pointer, buffer, size_in_bytes)
+
+    unicode_string = getattr(parent_structure, unicode_string_attribut_name)
+    old_protect = make_writable(parent_address, structure_size)
+
+    unicode_string.Buffer = cast(new_string_pointer, c_wchar_p)
+    unicode_string.Length = string_size
+    unicode_string.MaximumLength = size_in_bytes
+
+    setattr(parent_structure, unicode_string_attribut_name, unicode_string)
+    restore_protection(parent_address, structure_size, old_protect)
+
+
+def modify_process_informations(
+    peb: PEB, executable_path: str, command_line: str
+) -> None:
+    """
+    This function modify the unicode strings
+    for command line and executable full path.
+    """
+
+    user_parameters = peb.ProcessParameters
+    modify_unicode_string_from_parent(
+        user_parameters, "ImagePathName", executable_path
+    )
+    modify_unicode_string_from_parent(
+        user_parameters, "CommandLine", command_line
+    )
+
+
+def containing_record(
+    address: int, struct_type: Structure, field_name: str
+) -> POINTER:
+    """
+    This function parses a structure self contained
+    by another structure and returns the pointer.
+
+    It's used to get the LDR_DATA_TABLE_ENTRY from LIST_ENTRY,
+    to list modules in process memory.
+    """
+
+    offset = getattr(struct_type, field_name).offset
+    return cast(address - offset, POINTER(struct_type))
+
+
+def get_modules_strings(
+    peb: PEB,
+) -> Iterable[Tuple[UNICODE_STRING, UNICODE_STRING]]:
+    """
+    This functions returns modules from the PEB.
+    """
+
+    loaded_module_lists = peb.Ldr.contents
+    head = addressof(loaded_module_lists.InMemoryOrderModuleList)
+    current = loaded_module_lists.InMemoryOrderModuleList.Flink
+
+    while addressof(current.contents) != head:
+        module = containing_record(
+            addressof(current.contents),
+            LDR_DATA_TABLE_ENTRY,
+            "InMemoryOrderLinks",
+        ).contents
+
+        yield module.BaseDllName, module.FullDllName
+
+        current = module.InMemoryOrderLinks.Flink
+
+
+def modify_unicode_string(
+    unicode_string: UNICODE_STRING, new_value: str
+) -> None:
+    """
+    This function modify an unicode strings values.
+    """
+
+    bytes_value = new_value.encode("utf-16le")
+    size_bytes_value = len(bytes_value)
+
+    buffer = VirtualAlloc(
+        None, size_bytes_value, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE
+    )
+    if not buffer:
+        raise WinError(get_last_error())
+
+    memmove(buffer, bytes_value, size_bytes_value)
+
+    unicode_string_address = addressof(unicode_string)
+    old_protect = DWORD()
+
+    if not VirtualProtect(
+        unicode_string_address,
+        sizeof(UNICODE_STRING),
+        PAGE_READWRITE,
+        byref(old_protect),
+    ):
+        raise WinError(get_last_error())
+
+    unicode_string.Buffer = cast(buffer, LPWSTR)
+    unicode_string.Length = size_bytes_value
+    unicode_string.MaximumLength = size_bytes_value
+
+    if not VirtualProtect(
+        unicode_string_address,
+        sizeof(UNICODE_STRING),
+        old_protect.value,
+        byref(old_protect),
+    ):
+        raise WinError(get_last_error())
+
+
+def modify_executable_path_name(
+    peb: PEB, module_name: str, fullpath: str
+) -> None:
+    """
+    This function modify the executable module path and name.
+    """
+
+    for name, path in get_modules_strings(peb):
+        if wstring_at(name.Buffer, name.Length // 2).endswith(".exe"):
+            modify_unicode_string(name, module_name)
+            modify_unicode_string(path, fullpath)
+
+
+def read_memory(address: int, size: int) -> bytes:
+    """
+    This function reads a memory area using ReadProcessMemory.
+    """
+
+    buffer = (c_ubyte * size)()
+    bytes_read_size = c_size_t()
+    success = ReadProcessMemory(
+        GetCurrentProcess(),
+        c_void_p(address),
+        buffer,
+        size,
+        byref(bytes_read_size),
+    )
+    if not success:
+        raise WinError()
+    return bytes(buffer[: bytes_read_size.value])
+
+
+def get_stored_command_line_address(
+    func_base_addr: int, instruction_bytes: bytes
+) -> int:
+    """
+    This function returns the address
+    where command line address is stored.
+    """
+
+    if len(instruction_bytes) < 7:
+        raise ValueError("Instruction bytes too short")
+    if instruction_bytes[0:3] != b"\x48\x8B\x05":
+        raise ValueError("Unexpected opcode, expected MOV RAX, [RIP+disp32]")
+
+    disp_bytes = instruction_bytes[3:7]
+    disp32 = int.from_bytes(disp_bytes, byteorder="little", signed=True)
+    next_instr_addr = func_base_addr + 7
+
+    return next_instr_addr + disp32
+
+
+def set_command_line(command_line: str, function_name: str) -> None:
+    """
+    This function modify the command line address for the Win32 API.
+    """
+
+    kernelbase = GetModuleHandleW("kernelbase.dll")
+    address = GetProcAddress(kernelbase, function_name.encode())
+    instructions = read_memory(address, 7)
+    command_pointer_address = get_stored_command_line_address(
+        address, instructions
+    )
+
+    if function_name.endswith("W"):
+        command = create_unicode_buffer(command_line)
+        command_size = sizeof(command)
+    elif function_name.endswith("A"):
+        command = create_string_buffer(command_line.encode())
+        command_size = sizeof(command)
+    else:
+        raise ValueError("Invalid function name")
+
+    buffer = VirtualAlloc(
+        None, command_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE
+    )
+
+    if not buffer:
+        raise WinError()
+
+    memmove(buffer, command, command_size)
+
+    address_size = sizeof(c_void_p)
+    written = SIZE_T(0)
+
+    if not WriteProcessMemory(
+        GetCurrentProcess(),
+        command_pointer_address,
+        byref(LPVOID(buffer)),
+        address_size,
+        byref(written),
+    ):
+        raise WinError()
+
+def set_command_lines(command_line: str) -> None:
+    """
+    This function modify ANSI and Unicode command lines in Win32 API.
+    """
+
+    set_command_line(command_line, "GetCommandLineW")
+    set_command_line(command_line, "GetCommandLineA")
 
 
 def load_struct_from_bytes(struct: type, data: bytes) -> Structure:
@@ -699,9 +1406,7 @@ def load_imports(functions: List[ImportFunction]) -> None:
     if not functions:
         return None
 
-    size_pointer = sizeof(
-        c_uint64 if functions[0].import_address > 0xFFFFFFFF else c_uint32
-    )
+    size_pointer = sizeof(c_void_p)
 
     for function in functions:
         old_permissions = DWORD(0)
@@ -818,20 +1523,36 @@ def main() -> int:
     This is the main function to start the program from command line.
     """
 
-    if len(argv) <= 1:
+    print(copyright)
+
+    if len(argv) != 3:
         print(
             'USAGES: "',
             executable,
             '" "',
             argv[0],
-            '" <executables path...>',
+            '" [executables path] [command line]',
+            file=stderr,
             sep="",
         )
         return 1
 
-    for path in argv[1:]:
-        load(open(path, "rb"))
+    path = argv[1]
+    command_line = argv[2]
 
+    if not isfile(path):
+        print("Executable path doesn't exists.", file=stderr)
+        return 2
+
+    module_name = basename(path)
+    full_path = abspath(path)
+    peb = get_peb()
+
+    modify_process_informations(peb, full_path, command_line)
+    modify_executable_path_name(peb, module_name, full_path)
+    set_command_lines(command_line)
+
+    load(open(path, "rb"))
     return 0
 
 
